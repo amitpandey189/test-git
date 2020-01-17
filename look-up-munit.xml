@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:os="http://www.mulesoft.org/schema/mule/os" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:s3="http://www.mulesoft.org/schema/mule/s3"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/s3 http://www.mulesoft.org/schema/mule/s3/current/mule-s3.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="7aa02bab-e4ed-42f3-bc58-8fa81479bae2" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<ee:object-store-caching-strategy name="Caching_Strategy" doc:name="Caching Strategy" doc:id="05d3ef3c-9186-4c10-bbe5-a55d1b2b4593" keyGenerationExpression="#[vars.configFile]"/>
+	<s3:config name="Amazon_S3_Configuration" doc:name="Amazon S3 Configuration" doc:id="9f5fa8b8-1729-433e-a02c-76c5c21f54f8" >
+		<s3:basic-connection accessKey="${AWS-S3.accesskey}" secretKey="${AWS-S3.secretkey}" region="US_EAST_2" />
+	</s3:config>
+	<configuration-properties doc:name="Configuration properties" doc:id="f3a10c02-f22a-47cc-8b9a-13960bfdb44d" file="${env}.yaml" />
+	<flow name="lookup-fwkFlow" doc:id="85d81a70-8de3-48d0-a79e-73ad37954b15" >
+		<http:listener doc:name="Listener" doc:id="b22ec4c4-8c75-4542-be11-20a5b64aa878" config-ref="HTTP_Listener_config" path="/createS3Object"/>
+<!-- 		<s3:create-object doc:name="Create object" doc:id="bd6d1582-c7e0-46e8-b9ce-1e8b3b0bb1d6" config-ref="Amazon_S3_Configuration" bucketName="lookup-config-csv" key="#['testFile'++(now() as String{format:'yyyy-MM-dd-hh-mm-ss'})++'.txt']"/> -->
+		<set-variable value="config/dev/pgr_xref_country_code.csv" doc:name="configFile" doc:id="64069ee5-6c93-42cc-83d5-7669fd977f22" variableName="configFile"/>
+		<set-variable value="#[vars.configFile]" doc:name="Set Variable" doc:id="736ae155-8625-4bcf-9062-e6579eed029f" variableName="Set Variable"/>
+		<ee:cache doc:name="Cache" doc:id="9dd1ed57-6ea3-4113-90c4-05723853ccd2" cachingStrategy-ref="Caching_Strategy">
+			<flow-ref doc:name="Flow Reference" doc:id="317f643f-5d8a-4c36-949d-243e8d251b84" name="S3-implementationSub_Flow" />
+			<logger level="INFO" doc:name="Logger" doc:id="e77aba4a-b499-4ff7-99cf-f81f77b859c9" message="CACHE HIT"/>
+		</ee:cache>
+		<logger level="INFO" doc:name="Logger" doc:id="47261862-133b-4839-a849-a758b655ddf3" message="LOG Payload: #[payload]"/>
+		<ee:transform doc:name="Transform Message" doc:id="2a5bee74-e714-4215-be30-d73b849a8b46" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/csv
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="51c24015-092d-4f82-a5b2-b052445b87a3" message="SUCCESS"/>
+	</flow>
+	<sub-flow name="S3-implementationSub_Flow" doc:id="e574d3f6-a422-48a5-a61b-03773509a60b" >
+		<until-successful maxRetries="2" doc:name="Until Successful" doc:id="169f52b7-9a75-4ea2-b3ba-74563ba37e78" millisBetweenRetries="1000">
+			<try doc:name="Try" doc:id="97a4627e-4607-4504-ac86-b0281ba5894a" >
+				<s3:get-object doc:name="Get object" doc:id="1409c56d-0af2-4324-8e06-0c5d64193380" config-ref="Amazon_S3_Configuration" bucketName="latest-pgr-lab-finerp-config" key="#[vars.configFile]" />
+				<error-handler >
+					<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="9ecb1570-5e40-455c-a29c-1a1f110ec8c5" type="S3:CONNECTIVITY">
+						<logger level="INFO" doc:name="Logger" doc:id="99b52d61-cc3f-4bdc-8fd6-1f6452c8be0c" message="Connection is Failed"/>
+					</on-error-continue>
+					<on-error-continue enableNotifications="true" logException="true" doc:name="On Error Continue" doc:id="1df77dbe-5aff-4808-b72b-48e6a9b0c226" type="S3:NO_SUCH_UPLOAD">
+						<logger level="INFO" doc:name="Logger" doc:id="ee212278-894f-4474-a553-f18950632756" message="Connection is Failed"/>
+					</on-error-continue>
+				</error-handler>
+			</try>
+		</until-successful>
+		<set-variable value="#[payload]" doc:name="Set Variable" doc:id="3984585e-619d-437e-a3a9-0bb6268d3f85" variableName="s3Output"/>
+		<logger level="INFO" doc:name="Logger" doc:id="37c6e907-64ef-45fa-978f-56c120ee08e6" message="AWS Called #######" />
+	</sub-flow>
+</mule>
